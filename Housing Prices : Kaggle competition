@@ -1,0 +1,117 @@
+library(dplyr)
+library(Amelia)
+library(mice)
+library(ggplot2)
+library(lattice)
+train = read.csv("train.csv", stringsAsFactors = TRUE)
+test = read.csv("test.csv", stringsAsFactors = TRUE)
+
+#Checking which columns have NAs
+colSums(sapply(train, is.na))
+colSums(sapply(test, is.na))
+#Finding out which columns have NAs. 
+#Cross verify by using sum(colSums(sapply(train, is.na))>0) to find the number of columns that contain NAs
+
+#removing data with too many NAs
+exclude <- c('PoolQC', 'MiscFeature', 'Alley', 'Fence', 'Utilities')
+include <- setdiff(names(train), exclude)
+include1 <- setdiff(names(test), exclude)
+train <- train[include]
+test <- test[include1]
+test$SalePrice <- 0
+
+#handling missing values using mice package
+imp.train <- mice(train, m=1, method='cart', printFlag=FALSE)
+imp.test <- mice(test, m=1, method='cart', printFlag=FALSE)
+train_complete <- complete(imp.train)
+test_complete <- complete(imp.test)
+
+#Checking if all the NAs have been removed
+sum(sapply(train_complete, function(x) { sum(is.na(x)) }))
+sum(sapply(test_complete, function(x) { sum(is.na(x)) }))
+
+
+levels(test_complete$MSZoning           ) = levels(train_complete$MSZoning)
+levels(test_complete$Street             ) = levels(train_complete$Street)
+levels(test_complete$LotShape           ) = levels(train_complete$LotShape)      
+levels(test_complete$LandContour        ) = levels(train_complete$LandContour)
+levels(test_complete$LotConfig          ) = levels(train_complete$LotConfig)   
+levels(test_complete$LandSlope          ) = levels(train_complete$LandSlope)     
+levels(test_complete$Neighborhood       ) = levels(train_complete$Neighborhood)
+levels(test_complete$Condition1         ) = levels(train_complete$Condition1)    
+levels(test_complete$Condition2         ) = levels(train_complete$Condition2)    
+levels(test_complete$BldgType           ) = levels(train_complete$BldgType)        
+levels(test_complete$HouseStyle         ) = levels(train_complete$HouseStyle)    
+levels(test_complete$RoofStyle          ) = levels(train_complete$RoofStyle)     
+levels(test_complete$RoofMatl           ) = levels(train_complete$RoofMatl)        
+levels(test_complete$Exterior1st        ) = levels(train_complete$Exterior1st) 
+levels(test_complete$Exterior2nd        ) = levels(train_complete$Exterior2nd) 
+levels(test_complete$MasVnrType         ) = levels(train_complete$MasVnrType)    
+levels(test_complete$ExterQual          ) = levels(train_complete$ExterQual)     
+levels(test_complete$ExterCond          ) = levels(train_complete$ExterCond)     
+levels(test_complete$Foundation         ) = levels(train_complete$Foundation)    
+levels(test_complete$BsmtQual           ) = levels(train_complete$BsmtQual)        
+levels(test_complete$BsmtCond           ) = levels(train_complete$BsmtCond)        
+levels(test_complete$BsmtExposure       ) = levels(train_complete$BsmtExposure)
+levels(test_complete$BsmtFinType1       ) = levels(train_complete$BsmtFinType1)
+levels(test_complete$BsmtFinType2       ) = levels(train_complete$BsmtFinType2)
+levels(test_complete$Heating            ) = levels(train_complete$Heating)         
+levels(test_complete$HeatingQC          ) = levels(train_complete$HeatingQC)     
+levels(test_complete$CentralAir         ) = levels(train_complete$CentralAir)    
+levels(test_complete$Electrical         ) = levels(train_complete$Electrical)    
+levels(test_complete$KitchenQual        ) = levels(train_complete$KitchenQual) 
+levels(test_complete$Functional         ) = levels(train_complete$Functional)      
+levels(test_complete$GarageType         ) = levels(train_complete$GarageType)      
+levels(test_complete$GarageQual         ) = levels(train_complete$GarageQual)      
+levels(test_complete$GarageCond         ) = levels(train_complete$GarageCond)      
+levels(test_complete$FireplaceQu        ) = levels(train_complete$FireplaceQu)   
+levels(test_complete$PavedDrive         ) = levels(train_complete$PavedDrive)      
+levels(test_complete$SaleType           ) = levels(train_complete$SaleType)          
+levels(test_complete$SaleCondition     ) = levels(train_complete$SaleCondition)
+levels(test_complete$GarageFinish      ) = levels(train_complete$GarageFinish)
+
+#Splitting the dataset into training and t=est set
+library(caTools)
+set.seed(123)
+split = sample.split(train_complete$SalePrice, SplitRatio = 0.8)
+training_set = subset(train_complete, split == TRUE)
+test_set = subset(train_complete, split == FALSE)
+
+#Fitting the random forest model to the training dataset
+#library(randomForest)
+#set.seed(1234)
+#regressor = randomForest(x = training_set[-76],
+                         #y = training_set$SalePrice,
+                         #ntree = 100)
+
+#Fitting te XGBoost model to the training dataset
+library(xgboost)
+#classifier = xgboost(data = as.matrix(training_set[-76]), label = training_set$SalePrice, nrounds = 10)
+classifier <- xgboost(data = data.matrix(training_set[-76]), label = training_set$SalePrice,nrounds = 50,
+                 nfold = 5, 
+                showsd = T, stratified = T, early_stopping_rounds = 20, maximize = F)
+# Predicting a new result with Random Forest Regression
+#y_pred = predict(regressor, test_set)
+#y_pred2 = predict(regressor, test_complete)
+
+# Predicting a new result with XGBoost
+y_pred = predict(classifier, data.matrix(test_set))
+y_pred2 = predict(classifier,data.matrix(test_complete))
+
+#Evaluating the model using RMSE and Standard Deviation
+RMSE <- function(x,y){
+  a <- sqrt(sum((log(x)-log(y))^2)/length(y))
+  return(a)
+}
+
+RMSE1 <- RMSE(y_pred, test_set$SalePrice)
+
+sd(test_set$SalePrice)
+
+RMSE2 <- (sqrt(sum((y_pred - test_set$SalePrice)^2)/length(y_pred)))/(max(y_pred)-min(y_pred)) #RMSE without the log transform
+
+#Saving the output to the local
+output <- cbind(test[1], y_pred2)
+library(xlsx)
+write.csv(output, "housing_prices7.csv")
+
